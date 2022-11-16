@@ -1,0 +1,9 @@
+Training Data:
+Directory of Fast5s for reads without modifications at position p
+Directory of Fast5s for reads with modifications at position p
+
+Input:
+A read. Or a subset of the read around position p.
+
+Output:
+Prob(read at position p is modified)
