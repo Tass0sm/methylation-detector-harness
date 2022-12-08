@@ -1,11 +1,14 @@
+import pickle
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+from numpy.random import MT19937
+from numpy.random import RandomState, SeedSequence
+
 from sklearn import model_selection, metrics
 
-fpr = dict()
-tpr = dict()
-roc_auc = dict()
+from plotting import *
 
 ###############################################################################
 #                                     data                                    #
@@ -13,11 +16,11 @@ roc_auc = dict()
 
 LABELLED_DATA_LIST = {
     8078: {'positive': '/fs/project/PAS1405/GabbyLee/project/m6A_modif/machine_learning/model_basedir/8079pos_newF1F2GL_fishers0.csv',
-           'negative': '/fs/project/PAS1405/GabbyLee/project/m6A_modif/machine_learning/model_basedir/8079neg_newF1F2GL_fishers0.csv'},
+           'negative': '/fs/project/PAS1405/General/tassosm/ROC_PR_curve/ctrl9kb_newF1F2GL_msc0.csv'},
     8974: {'positive': '/fs/project/PAS1405/GabbyLee/project/m6A_modif/machine_learning/model_basedir/8975pos_newF1F2GL_fishers0.csv',
-           'negative': '/fs/project/PAS1405/GabbyLee/project/m6A_modif/machine_learning/model_basedir/8975neg_newF1F2GL_fishers0.csv'},
+           'negative': '/fs/project/PAS1405/General/tassosm/ROC_PR_curve/ctrl9kb_newF1F2GL_msc0.csv'},
     8988: {'positive': '/fs/project/PAS1405/GabbyLee/project/m6A_modif/machine_learning/model_basedir/8989pos_newF1F2GL_fishers0.csv',
-           'negative': '/fs/project/PAS1405/GabbyLee/project/m6A_modif/machine_learning/model_basedir/8975neg_newF1F2GL_fishers0.csv'}
+           'negative': '/fs/project/PAS1405/General/tassosm/ROC_PR_curve/ctrl9kb_newF1F2GL_msc0.csv'},
 }
 
 RANGE_OF_BASES_TO_INCLUDE = (-4, 1) # inclusive
@@ -62,98 +65,169 @@ def prepare_labelled_data(site):
 
     labelled_df = pd.concat(to_concat)
     pivoted_labelled_df = labelled_df.pivot(
-        index=['positive', 'read_id', 'site_0b'],
+        index=['positive', 'read_id'],
         columns='delta',
         values='pval'
     ).dropna()
 
     return pivoted_labelled_df
 
-def get_split_labelled_data(site):
+def get_randomized_data(site):
     pivoted_labelled_df = prepare_labelled_data(site)
-    X = pivoted_labelled_df.values
-    y = pivoted_labelled_df.index.get_level_values("positive").values
+    Xy_df = pivoted_labelled_df.reset_index(level=0).astype("float64")
+    Xy_df = Xy_df[[*Xy_df.columns[1:], Xy_df.columns[0]]]
 
-    # TODO: this is wrong, will fix later:
-    sss = model_selection.StratifiedShuffleSplit(n_splits=2, test_size=0.5, random_state=0)
-    g = sss.split(X, y)
-    X_train_idx, y_train_idx = next(g)
-    X_test_idx, y_test_idx = next(g)
+    rs = RandomState(MT19937(SeedSequence(123456789)))
+    Xy_df = Xy_df.sample(frac = 1, random_state=rs)
 
-    X_train = X[X_train_idx]
-    y_train = y[y_train_idx].astype(np.float32)
-    X_test = X[X_test_idx]
-    y_test = y[y_test_idx].astype(np.float32)
+    return Xy_df
+
+def test_train_split(Xy_df):
+    half_point = Xy_df.shape[0] // 2
+    col_point = Xy_df.shape[1] - 1
+
+    Xy_train = Xy_df.iloc[0:half_point, :].values
+    X_train = Xy_train[:, 0:col_point]
+    y_train = Xy_train[:, col_point]
+
+    Xy_test = Xy_df.iloc[0:half_point, :].values
+    X_test = Xy_test[:, 0:col_point]
+    y_test = Xy_test[:, col_point]
 
     return X_train, y_train, X_test, y_test
 
+
 ###############################################################################
-#                                training data                                #
+#                                   testing                                   #
 ###############################################################################
 
-site = 8078
-X_train, y_train, X_test, y_test = get_split_labelled_data(site)
+# import kim.interface
 
-#                                  kim model                                  #
+# model_site = 8974
+# test_site = 8974
+
+# X_train, y_train, nop, nop = get_split_labelled_data(model_site)
+# nop, nop, X_test, y_test = get_split_labelled_data(test_site)
+
+# df = kim.interface.train(X_train, y_train)
+# dfs = [df]
+
+# fig, ax = plt.subplots(1, 1)
+
+# plot_prcs_for_site(ax, dfs, X_test, y_test)
+
+# fig.savefig("test1.png")
+
+###############################################################################
+#                                  main code                                  #
+###############################################################################
+
 import kim.interface
-kim_decision_function = kim.interface.train(X_train, y_train)
 
-#                                  tombo-msc                                  #
-import tombo_msc.interface
-tombo_msc_decision_function = tombo_msc.interface.train(X_train, y_train)
+other_models = ["m6anet", "nanom6a"]
+            
+def main():
+    train_cache = {}
+    test_cache = {}
 
-#                                    xpore                                    #
-import xpore.interface
-xpore_decision_function = xpore.interface.train(X_train, y_train)
+    for site in [8078, 8974, 8988]:
+        Xy_df = get_randomized_data(site)
+        X_train, y_train, X_test, y_test = test_train_split(Xy_df)
+        train_cache[site] = (X_train.copy(), y_train.copy())
+        test_cache[site] = (X_test.copy(), y_test.copy())
+        print(f"saved data for {site}")
 
-#                                   nanom6a                                   #
-import nanom6a.interface
-nanom6a_decision_function = nanom6a.interface.train(X_train, y_train)
+    fig, axes = plt.subplots(3, 3, figsize=(13, 13))
 
-#                                    m6anet                                   #
-import m6anet.interface
-m6anet_decision_function = m6anet.interface.train(X_train, y_train)
+    for i, model_site in enumerate([8078, 8974, 8988]):
+        X_train, y_train = train_cache[model_site]
+        df = kim.interface.train(X_train, y_train)
+        dfs = [df]
+        for j, test_site in enumerate([8078, 8974, 8988]):
+            X_test, y_test = test_cache[test_site]
+            plot_rocs_for_site(axes[i, j], dfs, X_test, y_test)
 
-#                                   nanoRMS                                   #
-import nanoRMS.interface
-nanoRMS_decision_function = nanoRMS.interface.train(X_train, y_train)
+            for model in other_models:
+                with open(f"./{model}/{test_site}-predictions.pickle", "rb") as pred_f, open(f"./{model}/{test_site}-test.pickle", "rb") as test_f:
+                    model_y_pred_at_current_test_site = pickle.load(pred_f)
+                    model_y_test_at_current_test_site = pickle.load(test_f)
 
-###############################################################################
-#                               making all rocs                               #
-###############################################################################
+                    if model_y_pred_at_current_test_site.dtype == np.object:
+                        model_y_pred_at_current_test_site = model_y_pred_at_current_test_site.astype(np.float64)
+                        model_y_test_at_current_test_site = model_y_test_at_current_test_site.astype(np.float64)
 
-lw = 2
+                    model_y_pred_at_current_test_site = np.nan_to_num(model_y_pred_at_current_test_site)
+                    model_y_test_at_current_test_site = np.nan_to_num(model_y_test_at_current_test_site)
 
-def plot_model_roc_for_site(ax, decision_function, site):
-    plt.figure()
+                    plot_roc_for_site_by_y_hat(axes[i, j],
+                                               model_y_pred_at_current_test_site,
+                                               model_y_test_at_current_test_site,
+                                               label=model)
 
-    y_hat = decision_function(X_test)
+            axes[i, j].legend(loc="lower right")
 
-    fpr_arr, tpr_arr, thresholds = metrics.roc_curve(y_test, y_hat)
-    roc_auc = metrics.auc(fpr_arr, tpr_arr)
+    pad = 5 # in points
 
-    ax.plot(
-        fpr_arr,
-        tpr_arr,
-        lw=lw,
-        label=f"ROC curve (area = %0.2f)" % roc_auc,
-    )
+    cols = ['At Site {}'.format(site) for site in [8078, 8974, 8988]]
+    for ax, col in zip(axes[0], cols):
+        ax.annotate(col, xy=(0.5, 1), xytext=(0, pad),
+                    xycoords='axes fraction', textcoords='offset points',
+                    size='large', ha='center', va='baseline')
 
-def plot_rocs_for_site(ax, decision_functions, site):
-    for df in decision_functions:
-        plot_model_roc_for_site(ax, df, site)
+    rows = ['With model{}'.format(site) for site in [8078, 8974, 8988]]
+    for ax, row in zip(axes[:,0], rows):
+        ax.annotate(row, xy=(0, 0.5), xytext=(-ax.yaxis.labelpad - pad, 0),
+                    xycoords=ax.yaxis.label, textcoords='offset points',
+                    size='large', ha='right', va='center')
 
-def make_plot():
-    fig, ax = plt.subplots(1, 1)
+    fig.suptitle("Receiver Operating Characteristic Curves")
+    fig.savefig(f"all_rocs.png")
 
-    plot_rocs_for_site(ax, [kim_decision_function], site)
+    fig, axes = plt.subplots(3, 3, figsize=(13, 13))
 
-    ax.plot([0, 1], [0, 1], color="navy", lw=lw, linestyle="--")
-    ax.set_xlim([0.0, 1.05])
-    ax.set_ylim([0.0, 1.05])
-    ax.set_xlabel("False Positive Rate")
-    ax.set_ylabel("True Positive Rate")
-    ax.set_title("Receiver Operating Characteristic")
-    ax.legend(loc="lower right")
+    for i, model_site in enumerate([8078, 8974, 8988]):
+        X_train, y_train = train_cache[model_site]
+        df = kim.interface.train(X_train, y_train)
+        dfs = [df]
+        for j, test_site in enumerate([8078, 8974, 8988]):
+            X_test, y_test = test_cache[test_site]
+            plot_prcs_for_site(axes[i, j], dfs, X_test, y_test)
 
-    fig.savefig(f"roc_{site}.png")
+            for model in other_models:
+                with open(f"./{model}/{test_site}-predictions.pickle", "rb") as pred_f, open(f"./{model}/{test_site}-test.pickle", "rb") as test_f:
+                    model_y_pred_at_current_test_site = pickle.load(pred_f)
+                    model_y_test_at_current_test_site = pickle.load(test_f)
+
+                    if model_y_pred_at_current_test_site.dtype == np.object:
+                        model_y_pred_at_current_test_site = model_y_pred_at_current_test_site.astype(np.float64)
+                        model_y_test_at_current_test_site = model_y_test_at_current_test_site.astype(np.float64)
+
+                    model_y_pred_at_current_test_site = np.nan_to_num(model_y_pred_at_current_test_site)
+                    model_y_test_at_current_test_site = np.nan_to_num(model_y_test_at_current_test_site)
+
+                    plot_prc_for_site_by_y_hat(axes[i, j],
+                                               model_y_pred_at_current_test_site,
+                                               model_y_test_at_current_test_site,
+                                               label=model)
+
+            axes[i, j].legend(loc="lower left")
+
+    pad = 5 # in points
+
+    cols = ['At Site {}'.format(site) for site in [8078, 8974, 8988]]
+    for ax, col in zip(axes[0], cols):
+        ax.annotate(col, xy=(0.5, 1), xytext=(0, pad),
+                    xycoords='axes fraction', textcoords='offset points',
+                    size='large', ha='center', va='baseline')
+
+    rows = ['With model{}'.format(site) for site in [8078, 8974, 8988]]
+    for ax, row in zip(axes[:,0], rows):
+        ax.annotate(row, xy=(0, 0.5), xytext=(-ax.yaxis.labelpad - pad, 0),
+                    xycoords=ax.yaxis.label, textcoords='offset points',
+                    size='large', ha='right', va='center')
+
+    fig.suptitle("Precision Recall Curves")
+    fig.savefig(f"all_prcs.png")
+
+
+main()
