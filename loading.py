@@ -41,11 +41,11 @@ def longify(df):
     '''Convert dataframe output of load_csv to a long format'''
     return df.stack().rename('pval').reset_index()
 
-def prepare_labelled_data(site):
+def prepare_labelled_data(site, labelled_data_list=LABELLED_DATA_LIST):
     """The Kim Model makes a prediction about a modified site based on the Tombo
     MSC values surrounding that site in the read."""
 
-    data_file_pair = LABELLED_DATA_LIST[site]
+    data_file_pair = labelled_data_list[site]
     to_concat = []
     for filepath, positive in [(data_file_pair['positive'], True),
                                (data_file_pair['negative'], False)]:

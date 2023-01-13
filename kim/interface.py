@@ -17,6 +17,10 @@ classifier = svm.LinearSVC(
     max_iter=10000, # NOT default, changed from default(1000), 011122 Gabby
 )
 
+def trained_classifier(X_train, y_train):
+    classifier.fit(X_train, y_train)
+    return classifier
+
 def train(X_train, y_train):
     classifier.fit(X_train, y_train)
     return classifier.decision_function
